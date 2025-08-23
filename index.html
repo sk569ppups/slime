@@ -3,67 +3,84 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ぷるんスライム</title>
+<title>ぷるんスライム（白背景自動抜き）</title>
 <style>
-  :root{
-    --tx: 0px; /* タッチ方向への微移動（X） */
-    --ty: 0px; /* タッチ方向への微移動（Y） */
-  }
+  :root{ --tx:0px; --ty:0px; }
   body{
     margin:0; height:100svh; display:grid; place-items:center;
-    background:#f6f7fb; font-family:system-ui, sans-serif; touch-action:manipulation;
+    background:#f6f7fb; font-family:system-ui,sans-serif; touch-action:manipulation;
   }
-  .wrap{
-    position:relative; width:min(80vw, 360px); aspect-ratio:1/1; display:grid; place-items:center;
-  }
+  .wrap{ position:relative; width:min(80vw,360px); aspect-ratio:1/1; display:grid; place-items:center; }
   img.slime{
     width:100%; height:auto; display:block; user-select:none; -webkit-user-drag:none;
-    transform-origin:center center;
-    /* 通常時も少しだけぷにっとしてる雰囲気 */
+    transform-origin:center center; filter: drop-shadow(0 12px 18px rgba(0,0,0,.15));
     transition:filter .2s ease;
-    filter: drop-shadow(0 12px 18px rgba(0,0,0,.15));
   }
-
-  /* 触った瞬間の“ぷるん”アニメ。タッチ方向に少しだけ寄せる */
-  .jiggle{
-    animation: squish .6s cubic-bezier(.2,.7,.2,1.2);
-    transform: translate(var(--tx), var(--ty));
-  }
-
-  /* 追加のキラッ（ハイライト） */
-  .wrap::after{
-    content:""; position:absolute; inset:auto; left:50%; top:38%;
-    width:38%; aspect-ratio:2/1; border-radius:999px;
-    background: radial-gradient(ellipse at 50% 50%, rgba(255,255,255,.55), rgba(255,255,255,0) 70%);
-    transform: translate(-50%,-50%);
-    pointer-events:none; filter: blur(1px);
-  }
-
+  .jiggle{ animation: squish .6s cubic-bezier(.2,.7,.2,1.2); transform: translate(var(--tx),var(--ty)); }
   @keyframes squish{
-    0%   { transform: translate(var(--tx), var(--ty)) scale(1,1); }
-    20%  { transform: translate(var(--tx), var(--ty)) scale(1.12,.88); }
-    40%  { transform: translate(calc(var(--tx)*.5), calc(var(--ty)*.5)) scale(.92,1.08); }
-    60%  { transform: translate(calc(var(--tx)*.2), calc(var(--ty)*.2)) scale(1.06,.94); }
-    80%  { transform: translate(0,0) scale(.98,1.02); }
-    100% { transform: translate(0,0) scale(1,1); }
+    0%{transform:translate(var(--tx),var(--ty)) scale(1,1)}
+    20%{transform:translate(var(--tx),var(--ty)) scale(1.12,.88)}
+    40%{transform:translate(calc(var(--tx)*.5),calc(var(--ty)*.5)) scale(.92,1.08)}
+    60%{transform:translate(calc(var(--tx)*.2),calc(var(--ty)*.2)) scale(1.06,.94)}
+    80%{transform:translate(0,0) scale(.98,1.02)}
+    100%{transform:translate(0,0) scale(1,1)}
   }
-
-  /* 連打対応：アニメ中でも軽く反応 */
   img.slime:active{ filter: drop-shadow(0 8px 12px rgba(0,0,0,.18)); }
 </style>
 </head>
 <body>
 
 <div class="wrap">
-  <!-- ここをあなたの画像名に。例：slime.png -->
-  <img class="slime" src="slime.png" alt="スライム" id="slime">
+  <!-- ここは白背景のPNGでOK（透過PNGでも可） -->
+  <img class="slime" id="slime" src="slime.png" alt="スライム">
 </div>
 
 <script>
+  const WHITE_TOLERANCE = 30;   // ← 白に“どれだけ近いか”の許容（10〜60目安）
+  const FEATHER_BAND    = 18;   // ← 透明化の境目をなだらかに（ふちのギザギザ軽減）
+
   const slime = document.getElementById('slime');
   const wrap  = document.querySelector('.wrap');
 
-  // タッチ位置に応じて少しだけ押し込む方向を決める → CSS変数へ
+  // 画像ロード後、白背景を透明化したデータURLに差し替え
+  slime.addEventListener('load', ()=>{
+    // すでに透過済みなら何もしない（簡易チェック：上下左右の端が白っぽければ処理）
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = slime.currentSrc || slime.src;
+
+    img.onload = ()=>{
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const c2 = cv.getContext('2d', { willReadFrequently:true });
+      c2.drawImage(img, 0, 0);
+      const data = c2.getImageData(0,0,w,h);
+      const px = data.data;
+
+      // 白に近い色を透明化（距離ベース）
+      for (let i=0; i<px.length; i+=4){
+        const r=px[i], g=px[i+1], b=px[i+2];
+        // “白(255,255,255)” からの距離
+        const dr = 255 - r, dg = 255 - g, db = 255 - b;
+        const d  = Math.sqrt(dr*dr + dg*dg + db*db);
+
+        if (d <= WHITE_TOLERANCE){
+          // 完全透明
+          px[i+3] = 0;
+        } else if (d <= WHITE_TOLERANCE + FEATHER_BAND){
+          // フェザー：白に近いほど薄く
+          const t = (d - WHITE_TOLERANCE) / FEATHER_BAND; // 0→1
+          px[i+3] = Math.round(px[i+3] * t);
+        }
+      }
+      c2.putImageData(data,0,0);
+      // 置き換え
+      slime.src = cv.toDataURL('image/png');
+    };
+  }, { once:true });
+
+  // 触った方向へ少しだけ寄せて“ぷるん”
   function setNudge(e){
     const rect = wrap.getBoundingClientRect();
     const cx = rect.left + rect.width/2;
@@ -71,29 +88,17 @@
     const p  = ('touches' in e) ? e.touches[0] : e;
     const dx = p.clientX - cx;
     const dy = p.clientY - cy;
-    // ベクトルを短く正規化して最大10px程度だけ移動
     const len = Math.hypot(dx,dy) || 1;
-    const k = Math.min(10, len/10); // 強すぎない微移動
+    const k = Math.min(10, len/10);
     document.documentElement.style.setProperty('--tx', (dx/len * k).toFixed(2)+'px');
     document.documentElement.style.setProperty('--ty', (dy/len * k).toFixed(2)+'px');
   }
-
   function ploop(e){
     setNudge(e);
-    // 連打でも毎回アニメを再生できるようにクラスを付け直す
-    slime.classList.remove('jiggle');
-    // リフローしてから付け直し
-    void slime.offsetWidth;
-    slime.classList.add('jiggle');
+    slime.classList.remove('jiggle'); void slime.offsetWidth; slime.classList.add('jiggle');
   }
-
-  // PCクリック
   slime.addEventListener('mousedown', ploop);
-  // スマホタッチ
-  slime.addEventListener('touchstart', (e)=>{
-    e.preventDefault(); // スクロール抑止
-    ploop(e);
-  }, {passive:false});
+  slime.addEventListener('touchstart', (e)=>{ e.preventDefault(); ploop(e); }, {passive:false});
 </script>
 
 </body>
