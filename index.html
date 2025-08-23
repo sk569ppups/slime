@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ぷるんスライム</title>
+<style>
+  :root{
+    --tx: 0px; /* タッチ方向への微移動（X） */
+    --ty: 0px; /* タッチ方向への微移動（Y） */
+  }
+  body{
+    margin:0; height:100svh; display:grid; place-items:center;
+    background:#f6f7fb; font-family:system-ui, sans-serif; touch-action:manipulation;
+  }
+  .wrap{
+    position:relative; width:min(80vw, 360px); aspect-ratio:1/1; display:grid; place-items:center;
+  }
+  img.slime{
+    width:100%; height:auto; display:block; user-select:none; -webkit-user-drag:none;
+    transform-origin:center center;
+    /* 通常時も少しだけぷにっとしてる雰囲気 */
+    transition:filter .2s ease;
+    filter: drop-shadow(0 12px 18px rgba(0,0,0,.15));
+  }
+
+  /* 触った瞬間の“ぷるん”アニメ。タッチ方向に少しだけ寄せる */
+  .jiggle{
+    animation: squish .6s cubic-bezier(.2,.7,.2,1.2);
+    transform: translate(var(--tx), var(--ty));
+  }
+
+  /* 追加のキラッ（ハイライト） */
+  .wrap::after{
+    content:""; position:absolute; inset:auto; left:50%; top:38%;
+    width:38%; aspect-ratio:2/1; border-radius:999px;
+    background: radial-gradient(ellipse at 50% 50%, rgba(255,255,255,.55), rgba(255,255,255,0) 70%);
+    transform: translate(-50%,-50%);
+    pointer-events:none; filter: blur(1px);
+  }
+
+  @keyframes squish{
+    0%   { transform: translate(var(--tx), var(--ty)) scale(1,1); }
+    20%  { transform: translate(var(--tx), var(--ty)) scale(1.12,.88); }
+    40%  { transform: translate(calc(var(--tx)*.5), calc(var(--ty)*.5)) scale(.92,1.08); }
+    60%  { transform: translate(calc(var(--tx)*.2), calc(var(--ty)*.2)) scale(1.06,.94); }
+    80%  { transform: translate(0,0) scale(.98,1.02); }
+    100% { transform: translate(0,0) scale(1,1); }
+  }
+
+  /* 連打対応：アニメ中でも軽く反応 */
+  img.slime:active{ filter: drop-shadow(0 8px 12px rgba(0,0,0,.18)); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <!-- ここをあなたの画像名に。例：slime.png -->
+  <img class="slime" src="slime.png" alt="スライム" id="slime">
+</div>
+
+<script>
+  const slime = document.getElementById('slime');
+  const wrap  = document.querySelector('.wrap');
+
+  // タッチ位置に応じて少しだけ押し込む方向を決める → CSS変数へ
+  function setNudge(e){
+    const rect = wrap.getBoundingClientRect();
+    const cx = rect.left + rect.width/2;
+    const cy = rect.top  + rect.height/2;
+    const p  = ('touches' in e) ? e.touches[0] : e;
+    const dx = p.clientX - cx;
+    const dy = p.clientY - cy;
+    // ベクトルを短く正規化して最大10px程度だけ移動
+    const len = Math.hypot(dx,dy) || 1;
+    const k = Math.min(10, len/10); // 強すぎない微移動
+    document.documentElement.style.setProperty('--tx', (dx/len * k).toFixed(2)+'px');
+    document.documentElement.style.setProperty('--ty', (dy/len * k).toFixed(2)+'px');
+  }
+
+  function ploop(e){
+    setNudge(e);
+    // 連打でも毎回アニメを再生できるようにクラスを付け直す
+    slime.classList.remove('jiggle');
+    // リフローしてから付け直し
+    void slime.offsetWidth;
+    slime.classList.add('jiggle');
+  }
+
+  // PCクリック
+  slime.addEventListener('mousedown', ploop);
+  // スマホタッチ
+  slime.addEventListener('touchstart', (e)=>{
+    e.preventDefault(); // スクロール抑止
+    ploop(e);
+  }, {passive:false});
+</script>
+
+</body>
+</html>
