@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ぷるんスライム（白背景自動抜き）</title>
+<title>ぷるんスライム（表情切替＋白背景自動抜き＋SE）</title>
 <style>
   :root{ --tx:0px; --ty:0px; }
   body{
@@ -31,56 +31,79 @@
 <body>
 
 <div class="wrap">
-  <!-- ここは白背景のPNGでOK（透過PNGでも可） -->
-  <img class="slime" id="slime" src="slime.png" alt="スライム">
+  <!-- 初期は1枚目を表示（後で自動で透過化して差し替えます） -->
+  <img class="slime" id="slime" src="slime1.png" alt="スライム">
 </div>
 
 <script>
-  const WHITE_TOLERANCE = 30;   // ← 白に“どれだけ近いか”の許容（10〜60目安）
-  const FEATHER_BAND    = 18;   // ← 透明化の境目をなだらかに（ふちのギザギザ軽減）
+  // ===== 設定 =====
+  const WHITE_TOLERANCE = 30;   // 白に近い色まで透明化（上げるほど広く抜ける）
+  const FEATHER_BAND    = 18;   // ふちのフェザー幅
+  const EXPRESSIONS     = ['slime1.png', 'slime2.png']; // 交互に切替
+  const SE_FILE         = 'se_ploop.mp3'; // 効果音ファイル（同じフォルダに置く）
 
+  // ===== DOM =====
   const slime = document.getElementById('slime');
   const wrap  = document.querySelector('.wrap');
 
-  // 画像ロード後、白背景を透明化したデータURLに差し替え
-  slime.addEventListener('load', ()=>{
-    // すでに透過済みなら何もしない（簡易チェック：上下左右の端が白っぽければ処理）
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = slime.currentSrc || slime.src;
+  // ===== 効果音：同時連打でも遅延しないように小さな再生プール =====
+  const sePool = Array.from({length:3}, () => {
+    const a = new Audio(SE_FILE);
+    a.preload = 'auto';
+    a.volume = 0.8;   // 音量 0.0-1.0
+    return a;
+  });
+  let seIndex = 0;
+  function playSE(){
+    const a = sePool[seIndex++ % sePool.length];
+    try { a.currentTime = 0; a.play(); } catch(e) {/* ユーザー操作前などの再生ブロック対策 */}
+  }
 
-    img.onload = ()=>{
-      const w = img.naturalWidth, h = img.naturalHeight;
-      const cv = document.createElement('canvas');
-      cv.width = w; cv.height = h;
-      const c2 = cv.getContext('2d', { willReadFrequently:true });
-      c2.drawImage(img, 0, 0);
-      const data = c2.getImageData(0,0,w,h);
-      const px = data.data;
+  // ===== 画像の透過化（白抜き）をキャッシュ =====
+  const cache = new Map(); // filename -> dataURL
 
-      // 白に近い色を透明化（距離ベース）
-      for (let i=0; i<px.length; i+=4){
-        const r=px[i], g=px[i+1], b=px[i+2];
-        // “白(255,255,255)” からの距離
-        const dr = 255 - r, dg = 255 - g, db = 255 - b;
-        const d  = Math.sqrt(dr*dr + dg*dg + db*db);
+  function loadAndMakeTransparent(src){
+    return new Promise((resolve, reject)=>{
+      if (cache.has(src)) return resolve(cache.get(src));
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = ()=>{
+        const w = img.naturalWidth, h = img.naturalHeight;
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d', { willReadFrequently:true });
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0,0,w,h);
+        const px = data.data;
 
-        if (d <= WHITE_TOLERANCE){
-          // 完全透明
-          px[i+3] = 0;
-        } else if (d <= WHITE_TOLERANCE + FEATHER_BAND){
-          // フェザー：白に近いほど薄く
-          const t = (d - WHITE_TOLERANCE) / FEATHER_BAND; // 0→1
-          px[i+3] = Math.round(px[i+3] * t);
+        for (let i=0;i<px.length;i+=4){
+          const r=px[i], g=px[i+1], b=px[i+2], a=px[i+3];
+          if (a === 0) continue;
+          const dr = 255-r, dg = 255-g, db = 255-b;
+          const d  = Math.sqrt(dr*dr + dg*dg + db*db);
+          if (d <= WHITE_TOLERANCE){
+            px[i+3] = 0;
+          } else if (d <= WHITE_TOLERANCE + FEATHER_BAND){
+            const t = (d - WHITE_TOLERANCE) / FEATHER_BAND; // 0..1
+            px[i+3] = Math.round(a * t);
+          }
         }
-      }
-      c2.putImageData(data,0,0);
-      // 置き換え
-      slime.src = cv.toDataURL('image/png');
-    };
-  }, { once:true });
+        ctx.putImageData(data,0,0);
+        const url = cv.toDataURL('image/png');
+        cache.set(src, url);
+        resolve(url);
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
 
-  // 触った方向へ少しだけ寄せて“ぷるん”
+  // 初期プリロード（全表情を加工してキャッシュ）
+  Promise.all(EXPRESSIONS.map(loadAndMakeTransparent)).then(urls=>{
+    slime.src = urls[0]; // 初期も加工済みに差し替え
+  });
+
+  // ===== タッチ方向へ少しだけ寄せて“ぷるん” =====
   function setNudge(e){
     const rect = wrap.getBoundingClientRect();
     const cx = rect.left + rect.width/2;
@@ -93,11 +116,30 @@
     document.documentElement.style.setProperty('--tx', (dx/len * k).toFixed(2)+'px');
     document.documentElement.style.setProperty('--ty', (dy/len * k).toFixed(2)+'px');
   }
-  function ploop(e){
+
+  // ===== タップ毎に表情を交互切替 → ぷるん → SE =====
+  let exprIndex = 0;
+  async function ploop(e){
     setNudge(e);
-    slime.classList.remove('jiggle'); void slime.offsetWidth; slime.classList.add('jiggle');
+
+    // 表情切替（交互）
+    exprIndex = (exprIndex + 1) % EXPRESSIONS.length;
+    const nextFile = EXPRESSIONS[exprIndex];
+    const url = cache.get(nextFile) || await loadAndMakeTransparent(nextFile);
+    slime.src = url;
+
+    // ぷるん
+    slime.classList.remove('jiggle');
+    void slime.offsetWidth; // reflow
+    slime.classList.add('jiggle');
+
+    // 効果音
+    playSE();
   }
+
+  // PCクリック
   slime.addEventListener('mousedown', ploop);
+  // スマホタッチ（ユーザー操作内なので自動再生の制限をクリア）
   slime.addEventListener('touchstart', (e)=>{ e.preventDefault(); ploop(e); }, {passive:false});
 </script>
 
